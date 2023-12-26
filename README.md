@@ -98,4 +98,4 @@ install.packages("EBImage")
 
 ### Run R Scripts
 
-### Open R scripts in the R/ directory using R Studio. Run the scripts sequentially to execute different parts of the analysis.
+- Open R scripts in the R/ directory using R Studio. Run the scripts sequentially to execute different parts of the analysis.
