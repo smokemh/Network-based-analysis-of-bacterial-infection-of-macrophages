@@ -1,0 +1,582 @@
+DA1: Network-based analysis of bacterial infection of macrophages
+By
+Muhammad Hasnat
+
+
+            SET the working directory accordingly 
+```{r Setting Working Directory}
+setwd("D:/E from Previous Laptop/FAU-Medical Engineering/Hasnat/Learning/Github Repo Learning Python/Projects/Network-based analysis of bacterial infection of macrophages")
+```
+
+                              Initilizing All library
+```{r}
+library(GEOquery)
+library(dplyr)
+library(pheatmap)
+library(ggplot2)
+library(ggrepel)
+library(readr)
+library(limma)
+library(org.Hs.eg.db)
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(enrichR)
+library(pathview)
+library(org.Mm.eg.db)
+library(EBImage)
+
+```
+
+
+                                Data Manipulation
+
+```{r Getting Data from NCBI, message=FALSE, warning=FALSE, include=FALSE}
+
+GEO_ID <- "GSE61535"
+MData <- getGEO(GEO_ID, GSEMatrix =TRUE, AnnotGPL=TRUE)
+# To Convert to Expression data set
+MData <- MData[[length(MData)]]
+```
+ 
+ 
+```{r Filtering Samples}
+
+MData <- MData[ ,c(7,8,9,10,11,12)]
+MData
+```
+ 
+```{r Printing Data Obtained}
+                       
+pData(MData) ## print the sample information
+fData(MData) ## print the gene annotation
+exprs(MData) ## print the expression data
+```
+
+
+```{r CHECK THE NORMALIZATION}
+pData(MData)$data_processing[1]
+```
+                         
+                            
+                              Clinical Variables
+
+```{r Inspecting Clinical Variables}
+sampleInfo <- pData(MData)
+fvarLabels(MData) <- make.names(fvarLabels(MData))
+head(sampleInfo)
+table(sampleInfo$characteristics_ch1.1)
+
+```
+
+```{r Selecting Clinical Variable and Renamming them}
+#source_name_ch1 and characteristics_ch1.1 contains factors we might need for the analysis. 
+sampleInfo <- dplyr::select(sampleInfo, source_name_ch1,characteristics_ch1.1)
+## Optionally, rename to more convenient column names
+sampleInfo <- dplyr::rename(sampleInfo,group = source_name_ch1, patient=characteristics_ch1.1)
+head(sampleInfo)
+```
+
+```{r HeatMap}
+corMatrix <- cor(exprs(MData),use="c")
+pheatmap(corMatrix,
+         annotation_col=sampleInfo)
+```
+
+
+```{r Correlation of Matrix}
+rownames(sampleInfo)
+colnames(corMatrix)
+
+
+```
+
+
+```{r PCA Plot}
+pca <- prcomp(t(exprs(MData)))
+## Join the PCs to the sample information
+cbind(sampleInfo, pca$x) %>% 
+  ggplot(aes(x = PC1, y=PC2, col=group,label=paste("Patient", patient))) + geom_point() + geom_text_repel()
+```
+
+
+```{r Generating the FIle}
+full_output <- cbind(fData(MData),exprs(MData))
+write_csv(full_output, path="./csv/MData_full_output.csv")  ##FULL OUTPUT SAVE
+features <- fData(MData)
+features
+```
+
+
+```{r Feautred Selected Output}
+features <- dplyr::select(features,Gene.title,Gene.symbol, Gene.ID, UniGene.title, Chromosome.location, Chromosome.annotation, Nucleotide.Title)
+full_output <- cbind(features,exprs(MData))
+write_csv(full_output, path="./csv/MData_fetured_selected_output.csv")
+```
+                                              
+                               DIFFERENTIAL ANALYSIS
+
+
+```{r Design Matrix}
+# assign samples to groups and set up design matrix
+gs <- factor(c("0","0","0","1","1","1"))
+groups <- make.names(c("Uninfected","Wild Type"))
+levels(gs) <- groups
+MData$group <- gs
+design <- model.matrix(~group + 0, MData)
+colnames(design) <- levels(gs)
+design
+```
+
+
+
+```{r Filtering Lowly Exprseed Genes}
+summary(exprs(MData))
+## calculating median expression level
+cutoff <- median(exprs(MData))
+## TRUE or FALSE for whether each gene is "expressed" in each sample
+is_expressed <- exprs(MData) > cutoff
+## Identify genes expressed in more than 2 samples
+keep <- rowSums(is_expressed) > 2
+## check how many genes are removed / retained.
+table(keep)
+## subset to just those expressed genes
+MData <- MData[keep,]
+```
+
+
+```{r LimmaFit Function}
+###limmafit function which is also very similar to linear regression
+fit <- lmFit(exprs(MData), design)
+head(fit$coefficients)
+```
+
+
+```{r Contrast Matrix}
+contrasts <- makeContrasts(  Wild.Type-Uninfected  , levels=design)
+contrasts
+## can define multiple contrasts
+## Here Uninfected vs WildlyInfected
+```
+
+
+```{r limmafit function 2 with contrast}
+fit2 <- contrasts.fit(fit, contrasts)
+fit2 <- eBayes(fit2)
+topTable(fit2,adjust.method="fdr")
+tt1 <- topTable(fit2, coef=1,adjust.method="fdr")
+
+
+```
+
+
+```{r P value adjusted distribution}
+tt2 <- topTable(fit2, adjust="fdr", sort.by="B", number=Inf)
+hist(tt2$adj.P.Val, col = "grey", border = "white", xlab = "P-adj",
+     ylab = "Number of genes", main = "P-adj value distribution")
+```
+
+
+
+
+```{r Deciding Test}
+Tt <- decideTests(fit2)
+table(decideTests(fit2))
+```
+
+```{r}
+# Venn diagram of results
+vennDiagram(Tt, counts.col=c("red", "blue"),include=c("up", "down"),circle.col = c("red", "blue", "green"))
+```
+
+```{r relative array weights}
+aw <- arrayWeights(exprs(MData),design)
+aw <- arrayWeights(exprs(MData),design)
+aw
+```
+
+
+```{r Second Limmafit Function with array weights}
+fit <- lmFit(exprs(MData), design,
+             weights = aw)
+contrasts <- makeContrasts(  Wild.Type-Uninfected , levels=design)
+fit2 <- contrasts.fit(fit, contrasts)
+fit2 <- eBayes(fit2)
+
+```
+
+
+```{r Deciding Test again}
+dT <- decideTests(fit2)
+table(decideTests(fit2))
+topTable(fit2,adjust="fdr")
+
+```
+
+
+```{r}
+tt2 <- topTable(fit2, adjust="fdr", sort.by="B", number=Inf)
+hist(tt2$adj.P.Val, col = "grey", border = "white", xlab = "P-adj",
+     ylab = "Number of genes", main = "P-adj value distribution")
+```
+
+
+```{r}
+# Venn diagram of results
+vennDiagram(dT, counts.col=c("red", "blue"),include=c("up", "down"),circle.col = c("red", "blue"))
+
+
+```
+                      
+                      ANALYZYING DATA AND VISULIZATION
+
+```{r Anotation}
+anno <- fData(MData)
+groups <- make.names(c("Uninfected","Wildly Effected"))
+anno
+```
+
+
+```{r Selecting Data}
+anno <- dplyr::select(anno,Gene.title,Gene.symbol, Gene.ID, Chromosome.location, Nucleotide.Title)
+fit2$genes <- anno
+topTable(fit2,adjust="fdr")  ## all values in table
+```
+
+
+```{r Saving Data as csv}
+full_results <- topTable(fit2, number=Inf)
+full_results <- tibble::rownames_to_column(full_results,"ID")
+write_csv(full_results, path="./csv/full_resultsWithALLDATA.csv")
+```
+
+
+```{r Valcano plot}
+colnames(fit2) # list contrast names
+ct <- 1        # choose contrast of interest
+volcanoplot(fit2 , coef=ct, main=colnames(fit2)[ct], pch=20,
+  highlight=length(which(dT[,ct]!=0)), names=rep('+', nrow(fit2)))
+```
+
+
+```{r MD PLOT}
+plotMD(fit2, column=ct, status=dT[,ct], legend=F, pch=20, cex=1)
+abline(h=0)
+```
+
+
+```{r Plotting GGPLOT}
+
+p_cutoff <- 0.05
+fc_cutoff <- 0
+full_results %>% 
+  mutate(Significant = adj.P.Val < p_cutoff , logFC > fc_cutoff ) %>%
+  ggplot(aes(x = logFC, y = adj.P.Val , colour=Significant )) + geom_point()
+
+```
+
+
+```{r GGPLOT With Linear Regression Curve}
+
+full_results %>% 
+  mutate(Significant = adj.P.Val < p_cutoff, abs(logFC) > fc_cutoff ) %>% 
+  ggplot(aes(x = logFC, y = adj.P.Val, colour=Significant )) + geom_point(size=2,alpha=0.5) +geom_smooth() 
+
+
+```
+
+
+```{r Boxplot}
+#Boxplot to check normalization
+exprs(MData) <- log2(exprs(MData))
+boxplot(exprs(MData), cex.axis=0.5, las=2,  which="all", 
+        col = c(rep("Blue", 3), rep("Red", 3)),
+        outline=FALSE,main="Boxplot for Normalized Data in Log2")
+legend("topleft", groups, fill=c("Blue" ,"Red"), bty="n")
+```
+
+
+```{r GGPLOT with top 100 Genes}
+p_cutoff <- 0.05
+fc_cutoff <- 1
+topN <- 100
+options(ggrepel.max.overlaps = Inf)
+full_results %>% 
+  mutate(Significant = adj.P.Val < p_cutoff, abs(logFC) > fc_cutoff ) %>% 
+  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, Gene.symbol,"")) %>% 
+  ggplot(aes(x = logFC, y = B, col=Significant,label=Label)) + geom_point() + geom_text_repel(col="black")
+```
+
+
+```{r Filtering Particular Gene}
+## Get the results for particular gene of interest
+filter(full_results, Gene.symbol == "CXCL1")
+```
+
+
+```{r Specific Gene in Whole Data}
+
+## Get results for genes with TP53 in the name
+filter(full_results, grepl("CXC", Gene.symbol))
+```
+
+
+```{r Filtering w.r.t To P and FC values}
+p_cutoff <- 0.05
+fc_cutoff <- 1
+
+filter(full_results, adj.P.Val < 0.05, abs(logFC) > 0.2)
+```
+
+
+```{r Writing csv with filtered results}
+filter(full_results, adj.P.Val < 0.05, abs(logFC) > 0) %>%
+  write_csv(path="./csv/filtered_de_results.csv")
+
+```
+
+                        Most differentially-expressed genes
+
+
+```{r Top 100 most expressed genes}
+topN <- 100
+col_names <- c("Uninfected","Uninfected","Uninfected","Wildlyaffected","Wildlyaffected","Wildlyaffected")
+##
+ids_of_interest <- mutate(full_results, Rank = 1:n()) %>% 
+  filter(Rank < topN) %>% 
+  pull(ID)
+ids_of_interest
+```
+
+
+```{r Top 100 LogFC values}
+LogFCval <- mutate(full_results, Rank = 1:n()) %>% 
+  filter(Rank < topN) %>% 
+  pull(logFC)
+LogFCval
+
+```
+
+
+```{r Getting Gene Symbols of top 100}
+gene_names <- mutate(full_results, Rank = 1:n()) %>% 
+  filter(Rank < topN) %>% 
+  pull(Gene.symbol)
+
+
+```
+
+```{r Creating Matrix of Top 100 Genes}
+gene_matrix <- exprs(MData)[ids_of_interest,]
+
+```
+
+
+
+```{r Heatmap for top 100 differentially expressed Genes}
+Heat2 <- pheatmap(gene_matrix,
+     labels_row = gene_names,
+     labels_col = col_names,
+     scale="row",
+     main = "Top 100 Differentially Expressed Genes Scalled by Rows",
+     display_numbers = TRUE,
+     clustering_distance_rows = "maximum")
+
+png("./Graphs/heatmap_v2.png", res = 300, width = 3000, height = 5500)
+print(Heat2)
+dev.off()
+```
+
+
+
+                   Pathways Using Specific Genes
+
+
+
+```{r organism packages}
+keytypes(org.Hs.eg.db)
+columns(org.Hs.eg.db)
+```
+
+
+```{r Particular Gene present in Data}
+my_genes <- c("NR4A2", "RANBP3L","IL6","HIVEP2")
+
+anno <- AnnotationDbi::select(org.Hs.eg.db, 
+                              columns=c("ENSEMBL","GO"),
+                              keys=my_genes,
+                              keytype = "SYMBOL")
+anno
+```
+
+```{r Using GO:0006338}
+anno <- AnnotationDbi::select(org.Hs.eg.db,
+                              columns="SYMBOL",
+                              keys="GO:0006338",
+                              keytype="GO")
+anno
+```
+
+
+```{r Gene Names in a Particular Pathway}
+my_genes <- pull(anno, SYMBOL)
+ids_of_interest <-  filter(full_results,Gene.symbol %in% my_genes) %>% 
+  pull(ID)
+
+gene_names <-  filter(full_results,Gene.symbol %in% my_genes) %>% 
+  pull(Gene.symbol)
+```
+
+
+```{r HeatMap of Particular Pathway}
+gene_matrix <- exprs(MData)[ids_of_interest,]
+Heat3 <- pheatmap(gene_matrix,
+     labels_row = gene_names,
+     labels_col = col_names,
+     scale="row",
+     main = "Pathway of NR4A2, RANBP3L, IL6 , HIVEP2 Genes Using keys=GO:0006338",
+     display_numbers = TRUE,
+     clustering_distance_rows = "maximum")
+
+png("./Graphs/heatmap_v3.png", res = 300, width = 3000, height = 5500)
+print(Heat3)
+dev.off()
+```
+
+
+```{r Testing on Other Genes}
+my_genes <- c("CXCL1", "E2F7" ,"CXCL3", "CCL20", "EGR1", "CXCL2", "NOCT", "HSPA6", "GADD45B","CCL4", "IL6" ,"TNF")
+
+anno <- AnnotationDbi::select(org.Hs.eg.db, 
+                              columns=c("ENSEMBL","GO"),
+                              keys=my_genes,
+                              keytype = "SYMBOL")
+anno
+```
+
+```{r Using Key 0061844}
+anno <- AnnotationDbi::select(org.Hs.eg.db,
+                              columns="SYMBOL",
+                              keys="GO:0034097",
+                              keytype="GO")
+anno
+```
+
+
+```{r Genes in Particular Pathway}
+my_genes <- pull(anno, SYMBOL)
+ids_of_interest <-  filter(full_results,Gene.symbol %in% my_genes) %>% 
+  pull(ID)
+
+gene_names <-  filter(full_results,Gene.symbol %in% my_genes) %>% 
+  pull(Gene.symbol)
+```
+
+
+```{r Heatmap Using Key GO:0061844}
+gene_matrix <- exprs(MData)[ids_of_interest,]
+Heat4 <- pheatmap(gene_matrix,
+     labels_row = gene_names,
+     labels_col = col_names,
+     scale="row",
+     main = "Pathway of CXCL1, E2F7 ,CXCL3, CCL20, EGR1, CXCL2, NOCT, HSPA6, GADD45B,CCL4, IL6 ,TNF, APBB3 Using keys=GO:GO:0034097",
+     display_numbers = TRUE,
+     clustering_distance_rows = "maximum")
+
+png("./Graphs/heatmap_v4.png", res = 300, width = 4000, height = 5500)
+print(Heat4)
+dev.off()
+```
+
+                         Pathway Enrichment Analysis
+
+
+                       
+                       
+                      Pathway Enrichment Analysis of Top 1000 Genes
+```{r Top 100 Differentially Expressed Genes}
+data <- read_csv("./csv/top1000upanddown.csv")
+View(data)
+```
+
+
+```{r EnrichR Package Info and Databases}
+lsf.str("package:enrichR") # only three functions
+dbs <- listEnrichrDbs() # but 166 databases!
+#View(dbs)
+```
+
+
+```{r Selected Data Bases from enrichR Package}
+databases <- c("Reactome_2016", "KEGG_2021_Human", "GO_Biological_Process_2018", "NIH_Funded_PIs_2017_AutoRIF_ARCHS4_Predictions")
+```
+
+
+```{r Upregulated Gene}
+data %>% 
+  filter(logFC > 0) %>% 
+  pull(Gene.symbol) -> upregulated
+
+upregulated <- data$Gene.symbol
+
+
+```
+
+
+```{r Using enrichr and Choosing the pathway}
+enriched_up <- enrichr(upregulated, databases)
+enriched_up["Reactome_2016"]
+enriched_up["KEGG_2021_Human"]
+
+```
+
+
+```{r Mapping Entrezid with Gene Symbol}
+
+data %>% 
+  filter(logFC > 0) %>% 
+  mutate(gene_id = mapIds(org.Hs.eg.db, Gene.symbol, "ENTREZID", "SYMBOL")) %>% 
+  drop_na() -> upregulated_with_id
+```
+          
+
+```{r Finding Duplicate Genes}
+length(upregulated_with_id$gene_id)
+length(unique(upregulated_with_id$gene_id))
+upregulated_with_id[duplicated(upregulated_with_id$gene_id),]  #CFB and TNF are present Three time in data
+```
+
+
+```{r Getting Rid of Duplicates}
+data %>% 
+  filter(logFC > 0) %>% 
+  mutate(gene_id = mapIds(org.Hs.eg.db, Gene.symbol, "ENTREZID", "SYMBOL")) %>% 
+  drop_na() %>% 
+  distinct(gene_id, .keep_all = TRUE) -> upregulated_with_id
+```
+
+
+```{r Only LogFC values}
+upregulated_with_id %>% 
+  dplyr::select(logFC) -> fc
+```
+
+
+```{r Giving ROW name with gene ID}
+rownames(fc) <- upregulated_with_id$gene_id
+#view(fc)
+```
+
+
+```{r Legionellosis Using KEGG2021}
+pathview(gene.data = fc, pathway.id = "05134", species = "hsa", out.suffix = "upregulated", kegg.native = T)
+img <- readImage("./hsa05134.upregulated.png")
+display(img, method = "raster")
+```
+
+
+            
+
+
+            
+
+
