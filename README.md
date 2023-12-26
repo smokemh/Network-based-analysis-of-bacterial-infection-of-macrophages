@@ -94,15 +94,8 @@ install.packages("enrichR")
 install.packages("pathview")
 install.packages("org.Mm.eg.db")
 install.packages("EBImage")
-
+```
 
 ### Run R Scripts
+
 ### Open R scripts in the R/ directory using R Studio. Run the scripts sequentially to execute different parts of the analysis.
-
-
-
-
-
-
-
-```
