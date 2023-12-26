@@ -50,11 +50,12 @@ network.
 
 Clone this repository to your local machine:
 
-````bash
+```bash
 git clone https://github.com/smokemh/Network-based-analysis-of-bacterial-infection-of-macrophages
-'''''
+```
 
 ### Set Up R Studio Workspace
+
 - Open R Studio.
 - Navigate to File -> Open Project.
 - Select the cloned repository directory.
@@ -103,4 +104,5 @@ install.packages("EBImage")
 
 
 
-````
+
+```
